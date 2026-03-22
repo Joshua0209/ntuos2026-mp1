@@ -167,7 +167,19 @@ void thread_resume(struct thread *t) {
 
 void thread_join(struct thread *t) {
     //TODO
-    if (t->exited == 1) return;
+    // if (t->exited == 1) return; 
+    // thanks to the discussion. 
+    int t_exist = 0;
+    struct thread *ptr = current_thread->next;
+    while (ptr != current_thread) {
+        if (t == ptr) {
+            t_exist = 1;
+            break;
+        }
+        ptr = ptr->next;
+    }
+    if (!t_exist) return;
+
     current_thread->next_waiter = t->waiter_list;
     t->waiter_list = current_thread;
     current_thread->join_blocked = 1;
