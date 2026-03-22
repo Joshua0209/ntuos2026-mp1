@@ -58,31 +58,44 @@ void thread_add_runqueue(struct thread *t){
         t->previous = current_thread->previous;
         current_thread->previous = t;
         t->next = current_thread;
+
+        t->sig_handler[0] = current_thread->sig_handler[0];
+        t->sig_handler[1] = current_thread->sig_handler[1];
     }
 }
 
 void thread_yield(void){
     //TODO
-    if (setjmp(current_thread->env) == 0){
-        longjmp(env_st, 1);
+    if (current_thread->handler_buf_set == 1) {
+        if (setjmp(current_thread->handler_env) == 0) longjmp(env_st, 1);
     } else {
-        return;
+        if (setjmp(current_thread->env) == 0) longjmp(env_st, 1);
     }
 }
 
 void dispatch(void){
     //TODO
-    if (current_thread->buf_set == 0) {
-        if (setjmp(current_thread->env) == 0) {
-            current_thread->env[0].sp = (unsigned long) current_thread->stack_p;
-            longjmp(current_thread->env, 1);
-        } else {
-            current_thread->buf_set = 1;
-            current_thread->fp(current_thread->arg);
-            thread_exit();
-        }
-    } else {
+    if (current_thread->handler_buf_set == 1) longjmp(current_thread->handler_env, 1);
+    
+    if (current_thread->signo != -1) {
+        int signo = current_thread->signo;
+        if (current_thread->sig_handler[signo] == NULL_FUNC) thread_exit();
+
+        current_thread->handler_buf_set = 1;
+        current_thread->signo = -1;
+        current_thread->sig_handler[signo](signo);
+        current_thread->handler_buf_set = 0;
+    }
+
+    if (current_thread->buf_set == 1) longjmp(current_thread->env, 1);
+
+    if (setjmp(current_thread->env) == 0) {
+        current_thread->env[0].sp = (unsigned long) current_thread->stack_p;
         longjmp(current_thread->env, 1);
+    } else {
+        current_thread->buf_set = 1;
+        current_thread->fp(current_thread->arg);
+        thread_exit();
     }
 }
 
@@ -97,9 +110,14 @@ void schedule(void){
 }
 
 void thread_exit(void) {
-    // struct thread *w = current_thread->waiter_list;
+    struct thread *w = current_thread->waiter_list;
     struct thread *ptr = current_thread;
     //TODO (Part2)
+    while (w != NULL) {
+        w->join_blocked = 0;
+        w = w->next_waiter;
+    }
+    current_thread->exited = 1;
 
     ptr->next->previous = ptr->previous;
     ptr->previous->next = ptr->next;
@@ -131,6 +149,7 @@ void thread_register_handler(int signo, void (*handler)(int)){
 
 void thread_kill(struct thread *t, int signo){
     //TODO
+    t->signo = signo;
 }
 
 void thread_suspend(struct thread *t) {
@@ -148,4 +167,9 @@ void thread_resume(struct thread *t) {
 
 void thread_join(struct thread *t) {
     //TODO
+    if (t->exited == 1) return;
+    current_thread->next_waiter = t->waiter_list;
+    t->waiter_list = current_thread;
+    current_thread->join_blocked = 1;
+    thread_yield();
 }
